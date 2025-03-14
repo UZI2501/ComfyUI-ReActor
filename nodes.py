@@ -59,18 +59,19 @@ import scripts.r_masking.subcore as subcore
 import scripts.r_masking.core as core
 import scripts.r_masking.segs as masking_segs
 
-import scripts.reactor_sfw as sfw
+
 
 
 models_dir = folder_paths.models_dir
 REACTOR_MODELS_PATH = os.path.join(models_dir, "reactor")
 FACE_MODELS_PATH = os.path.join(REACTOR_MODELS_PATH, "faces")
-NSFWDET_MODEL_PATH = os.path.join(models_dir, "nsfw_detector","vit-base-nsfw-detector")
 
 if not os.path.exists(REACTOR_MODELS_PATH):
     os.makedirs(REACTOR_MODELS_PATH)
     if not os.path.exists(FACE_MODELS_PATH):
         os.makedirs(FACE_MODELS_PATH)
+
+
 
 dir_facerestore_models = os.path.join(models_dir, "facerestore_models")
 os.makedirs(dir_facerestore_models, exist_ok=True)
@@ -183,7 +184,7 @@ class reactor:
             global FACE_SIZE, FACE_HELPER
 
             self.face_helper = FACE_HELPER
-
+            
             faceSize = 512
             if "1024" in face_restore_model.lower():
                 faceSize = 1024
@@ -220,7 +221,7 @@ class reactor:
                 sd = comfy.utils.load_torch_file(model_path, safe_load=True)
                 facerestore_model = model_loading.load_state_dict(sd).eval()
                 facerestore_model.to(device)
-
+            
             if faceSize != FACE_SIZE or self.face_helper is None:
                 self.face_helper = FaceRestoreHelper(1, face_size=faceSize, crop_ratio=(1, 1), det_model=facedetection, save_ext='png', use_parse=True, device=device)
                 FACE_SIZE = faceSize
@@ -317,7 +318,7 @@ class reactor:
             result = restored_img_tensor
 
         return result
-
+    
     def execute(self, enabled, input_image, swap_model, detect_gender_source, detect_gender_input, source_faces_index, input_faces_index, console_log_level, face_restore_model,face_restore_visibility, codeformer_weight, facedetection, source_image=None, face_model=None, faces_order=None, face_boost=None):
 
         if face_boost is not None:
@@ -343,25 +344,11 @@ class reactor:
 
         if face_model == "none":
             face_model = None
-
+        
         script = FaceSwapScript()
         pil_images = batch_tensor_to_pil(input_image)
 
-        # NSFW checker
-        logger.status("Checking for any unsafe content")
-        pil_images_sfw = []
-        tmp_img = "reactor_tmp.png"
-        for img in pil_images:
-            if state.interrupted or model_management.processing_interrupted():
-                logger.status("Interrupted by User")
-                break
-            img.save(tmp_img)
-            if not sfw.nsfw_image(tmp_img, NSFWDET_MODEL_PATH):
-                pil_images_sfw.append(img)
-        if os.path.exists(tmp_img):
-            os.remove(tmp_img)
-        pil_images = pil_images_sfw
-        # # #
+
 
         if len(pil_images) > 0:
 
@@ -400,7 +387,7 @@ class reactor:
 
             if self.restore or not self.face_boost_enabled:
                 result = reactor.restore_face(self,result,face_restore_model,face_restore_visibility,codeformer_weight,facedetection)
-
+        
         else:
             image_black = Image.new("RGB", (512, 512))
             result = batched_pil_to_tensor([image_black])
@@ -415,7 +402,7 @@ class ReActorPlusOpt:
         return {
             "required": {
                 "enabled": ("BOOLEAN", {"default": True, "label_off": "OFF", "label_on": "ON"}),
-                "input_image": ("IMAGE",),
+                "input_image": ("IMAGE",),               
                 "swap_model": (list(model_names().keys()),),
                 "facedetection": (["retinaface_resnet50", "retinaface_mobile0.25", "YOLOv5l", "YOLOv5n"],),
                 "face_restore_model": (get_model_names(get_restorers),),
@@ -449,7 +436,7 @@ class ReActorPlusOpt:
         self.interpolation = "Bicubic"
         self.boost_model_visibility = 1
         self.boost_cf_weight = 0.5
-
+    
     def execute(self, enabled, input_image, swap_model, facedetection, face_restore_model, face_restore_visibility, codeformer_weight, source_image=None, face_model=None, options=None, face_boost=None):
 
         if options is not None:
@@ -459,13 +446,13 @@ class ReActorPlusOpt:
             self.detect_gender_source = options["detect_gender_source"]
             self.input_faces_index = options["input_faces_index"]
             self.source_faces_index = options["source_faces_index"]
-
+        
         if face_boost is not None:
             self.face_boost_enabled = face_boost["enabled"]
             self.restore = face_boost["restore_with_main_after"]
         else:
             self.face_boost_enabled = False
-
+        
         result = reactor.execute(
             self,enabled,input_image,swap_model,self.detect_gender_source,self.detect_gender_input,self.source_faces_index,self.input_faces_index,self.console_log_level,face_restore_model,face_restore_visibility,codeformer_weight,facedetection,source_image,face_model,self.faces_order, face_boost=face_boost
         )
@@ -481,7 +468,7 @@ class LoadFaceModel:
                 "face_model": (get_model_names(get_facemodels),),
             }
         }
-
+    
     RETURN_TYPES = ("FACE_MODEL",)
     FUNCTION = "load_model"
     CATEGORY = "🌌 ReActor"
@@ -497,110 +484,10 @@ class LoadFaceModel:
         return (out, )
 
 
-class ReActorWeight:
-    @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "required": {
-                "input_image": ("IMAGE",),
-                "faceswap_weight": (["0%", "12.5%", "25%", "37.5%", "50%", "62.5%", "75%", "87.5%", "100%"], {"default": "50%"}),
-            },
-            "optional": {
-                "source_image": ("IMAGE",),
-                "face_model": ("FACE_MODEL",),
-            }
-        }
-    
-    RETURN_TYPES = ("IMAGE","FACE_MODEL")
-    RETURN_NAMES = ("INPUT_IMAGE","FACE_MODEL")
-    FUNCTION = "set_weight"
-
-    OUTPUT_NODE = True
-
-    CATEGORY = "🌌 ReActor"
-
-    def set_weight(self, input_image, faceswap_weight, face_model=None, source_image=None):
-
-        if input_image is None:
-            logger.error("Please provide `input_image`")
-            return (input_image,None)
-        
-        if source_image is None and face_model is None:
-            logger.error("Please provide `source_image` or `face_model`")
-            return (input_image,None)
-
-        weight = float(faceswap_weight.split("%")[0])
-
-        images = []
-        faces = [] if face_model is None else [face_model]
-        embeddings = [] if face_model is None else [face_model.embedding]
-
-        if weight == 0:
-            images = [input_image]
-            faces = []
-            embeddings = []
-        elif weight == 100:
-            if face_model is None:
-                images = [source_image]
-        else:
-            if weight > 50:
-                images = [input_image]
-                count = round(100/(100-weight))
-            else:
-                if face_model is None:
-                    images = [source_image]
-                count = round(100/(weight))
-            for i in range(count-1):
-                if weight > 50:
-                    if face_model is None:
-                        images.append(source_image)
-                    else:
-                        faces.append(face_model)
-                        embeddings.append(face_model.embedding)
-                else:
-                    images.append(input_image)
-        
-        images_list: List[Image.Image] = []
-
-        apply_patch(1)
-
-        if len(images) > 0:
-
-            for image in images:
-                img = tensor_to_pil(image)
-                images_list.append(img)
-
-            for image in images_list:
-                face = BuildFaceModel.build_face_model(self,image)
-                if isinstance(face, str):
-                    continue
-                faces.append(face)
-                embeddings.append(face.embedding)
-        
-        if len(faces) > 0:
-            blended_embedding = np.mean(embeddings, axis=0)
-            blended_face = Face(
-                bbox=faces[0].bbox,
-                kps=faces[0].kps,
-                det_score=faces[0].det_score,
-                landmark_3d_68=faces[0].landmark_3d_68,
-                pose=faces[0].pose,
-                landmark_2d_106=faces[0].landmark_2d_106,
-                embedding=blended_embedding,
-                gender=faces[0].gender,
-                age=faces[0].age
-            )
-            if blended_face is None:
-                no_face_msg = "Something went wrong, please try another set of images"
-                logger.error(no_face_msg)
-
-        return (input_image,blended_face)
-
-
 class BuildFaceModel:
     def __init__(self):
         self.output_dir = FACE_MODELS_PATH
-
+    
     @classmethod
     def INPUT_TYPES(s):
         return {
@@ -638,14 +525,14 @@ class BuildFaceModel:
             face_model = analyze_faces(image, det_size_half)
             if face_model is not None and len(face_model) > 0:
                 print("...........................................................", end=" ")
-
+        
         if face_model is not None and len(face_model) > 0:
             return face_model[0]
         else:
             no_face_msg = "No face found, please try another image"
             # logger.error(no_face_msg)
             return no_face_msg
-
+    
     def blend_faces(self, save_mode, send_only, face_model_name, compute_method, images=None, face_models=None):
         global BLENDED_FACE_MODEL
         blended_face: Face = BLENDED_FACE_MODEL
@@ -676,7 +563,7 @@ class BuildFaceModel:
                         print(f"{int(((i+1)/n)*100)}%")
                     faces.append(face)
                     embeddings.append(face.embedding)
-
+            
             elif face_models is not None:
 
                 n = len(face_models)
@@ -782,7 +669,7 @@ class RestoreFace:
     def INPUT_TYPES(s):
         return {
             "required": {
-                "image": ("IMAGE",),
+                "image": ("IMAGE",),               
                 "facedetection": (["retinaface_resnet50", "retinaface_mobile0.25", "YOLOv5l", "YOLOv5n"],),
                 "model": (get_model_names(get_restorers),),
                 "visibility": ("FLOAT", {"default": 1, "min": 0.0, "max": 1, "step": 0.05}),
@@ -821,7 +708,7 @@ class MaskHelper:
         # self.force_resize_width = 0
         # self.force_resize_height = 0
         # self.resize_behavior = "source_size"
-
+    
     @classmethod
     def INPUT_TYPES(s):
         bboxs = ["bbox/"+x for x in folder_paths.get_filename_list("ultralytics_bbox")]
@@ -851,7 +738,7 @@ class MaskHelper:
                 "mask_optional": ("MASK",),
             }
         }
-
+    
     RETURN_TYPES = ("IMAGE","MASK","IMAGE","IMAGE")
     RETURN_NAMES = ("IMAGE","MASK","MASK_PREVIEW","SWAPPED_FACE")
     FUNCTION = "execute"
@@ -879,7 +766,7 @@ class MaskHelper:
                 if len(self.labels) > 0:
                     segs, _ = masking_segs.filter(segs, self.labels)
             # segs, _ = masking_segs.filter(segs, "all")
-
+            
             sam_modelname = folder_paths.get_full_path("sams", sam_model_name)
 
             if 'vit_h' in sam_model_name:
@@ -900,12 +787,12 @@ class MaskHelper:
             sam.is_auto_mode = self.device_mode == "AUTO"
 
             combined_mask, _ = core.make_sam_mask_segmented(sam, segs, images, self.detection_hint, sam_dilation, sam_threshold, bbox_expansion, mask_hint_threshold, mask_hint_use_negative)
-
+        
         else:
             combined_mask = mask_optional
 
         # *** MASK TO IMAGE ***:
-
+        
         mask_image = combined_mask.reshape((-1, 1, combined_mask.shape[-2], combined_mask.shape[-1])).movedim(1, -1).expand(-1, -1, -1, 3)
 
         # *** MASK MORPH ***:
@@ -922,12 +809,12 @@ class MaskHelper:
         elif morphology_operation == "close":
             mask_image = self.dilate(mask_image, morphology_distance)
             mask_image = self.erode(mask_image, morphology_distance)
-
+        
         # *** MASK BLUR ***:
-
+        
         if len(mask_image.size()) == 3:
             mask_image = mask_image.unsqueeze(3)
-
+        
         mask_image = mask_image.permute(0, 3, 1, 2)
         kernel_size = blur_radius * 2 + 1
         sigma = sigma_factor * (0.6 * blur_radius - 0.3)
@@ -936,7 +823,7 @@ class MaskHelper:
             mask_image_final = mask_image_final[:, :, :, 0]
 
         # *** CUT BY MASK ***:
-
+        
         if len(swapped_image.shape) < 4:
             C = 1
         else:
@@ -993,7 +880,7 @@ class MaskHelper:
                 single = (swapped_image[i, ymin:ymax+1, xmin:xmax+1,:]).unsqueeze(0)
                 resized = torch.nn.functional.interpolate(single.permute(0, 3, 1, 2), size=(use_height, use_width), mode='bicubic').permute(0, 2, 3, 1)
                 cutted_image[i] = resized[0]
-
+        
         # Preserve our type unless we were previously RGB and added non-opaque alpha due to the mask size
         if C == 1:
             cutted_image = core.tensor2mask(cutted_image)
@@ -1046,7 +933,7 @@ class MaskHelper:
 
         result = image_base.detach().clone()
         face_segment = mask_image_final
-
+        
         for i in range(0, MB):
             if is_empty[i]:
                 continue
@@ -1125,7 +1012,7 @@ class MaskHelper:
                 face_segment[...,3] = mask[i]
 
                 result = rgba2rgb_tensor(result)
-
+        
         return (result,combined_mask,mask_image_final,face_segment,)
 
     def gaussian_blur(self, image, kernel_size, sigma):
@@ -1154,7 +1041,7 @@ class MaskHelper:
         output_tensor = output_reshaped.reshape(batch_size, num_channels, height, width)
 
         return output_tensor
-
+    
     def erode(self, image, distance):
         return 1. - self.dilate(1. - image, distance)
 
@@ -1171,7 +1058,7 @@ class ImageDublicator:
     def INPUT_TYPES(s):
         return {
             "required": {
-                "image": ("IMAGE",),
+                "image": ("IMAGE",),               
                 "count": ("INT", {"default": 1, "min": 0}),
             },
         }
@@ -1183,7 +1070,7 @@ class ImageDublicator:
     CATEGORY = "🌌 ReActor"
 
     def execute(self, image, count):
-        images = [image for i in range(count)]
+        images = [image for i in range(count)]        
         return (images,)
 
 
@@ -1201,7 +1088,7 @@ class ImageRGBA2RGB:
     CATEGORY = "🌌 ReActor"
 
     def execute(self, image):
-        out = rgba2rgb_tensor(image)
+        out = rgba2rgb_tensor(image)       
         return (out,)
 
 
@@ -1210,7 +1097,7 @@ class MakeFaceModelBatch:
     def INPUT_TYPES(s):
         return {
             "required": {
-                "face_model1": ("FACE_MODEL",),
+                "face_model1": ("FACE_MODEL",), 
             },
             "optional": {
                 "face_model2": ("FACE_MODEL",),
@@ -1304,7 +1191,7 @@ class ReActorFaceBoost:
             "restore_with_main_after": restore_with_main_after,
         }
         return (face_boost, )
-
+    
 class ReActorUnload:
     @classmethod
     def INPUT_TYPES(s):
@@ -1330,7 +1217,6 @@ NODE_CLASS_MAPPINGS = {
     "ReActorOptions": ReActorOptions,
     "ReActorFaceBoost": ReActorFaceBoost,
     "ReActorMaskHelper": MaskHelper,
-    "ReActorSetWeight": ReActorWeight,
     # --- Operations with Face Models ---
     "ReActorSaveFaceModel": SaveFaceModel,
     "ReActorLoadFaceModel": LoadFaceModel,
@@ -1350,7 +1236,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ReActorOptions": "ReActor 🌌 Options",
     "ReActorFaceBoost": "ReActor 🌌 Face Booster",
     "ReActorMaskHelper": "ReActor 🌌 Masking Helper",
-    "ReActorSetWeight": "ReActor 🌌 Set Face Swap Weight",
     # --- Operations with Face Models ---
     "ReActorSaveFaceModel": "Save Face Model 🌌 ReActor",
     "ReActorLoadFaceModel": "Load Face Model 🌌 ReActor",
